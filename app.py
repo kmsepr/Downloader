@@ -1,5 +1,7 @@
 import os
 import subprocess
+import unicodedata
+import re
 from flask import Flask, request, send_file, render_template_string, redirect, url_for
 
 # Config
@@ -55,9 +57,11 @@ def get_cached_titles():
                 bases.add(base)
     return sorted(bases)
 
-# Utility: sanitize title to safe filename
+# Utility: sanitize title to ASCII-safe filename
 def sanitize(title):
-    return "".join(c for c in title if c.isalnum() or c in " _-").strip()
+    title = unicodedata.normalize('NFKD', title).encode('ascii', 'ignore').decode('ascii')
+    title = re.sub(r'[^a-zA-Z0-9 _-]', '_', title)
+    return title.strip()
 
 # Downloader function
 def download_and_convert(video_url):
@@ -67,7 +71,8 @@ def download_and_convert(video_url):
             "yt-dlp", "--cookies", COOKIES_PATH, "--get-title", video_url
         ]).decode().strip()
 
-        safe_title = sanitize(title)
+        safe_title = sanitize(title) or "video"
+
         video_path = os.path.join(DOWNLOAD_DIR, f"{safe_title}_360p.mp4")
         audio_path = os.path.join(DOWNLOAD_DIR, f"{safe_title}.mp3")
 
