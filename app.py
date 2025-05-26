@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 # HTML Template
 HTML = """
-<h1>Xylem Lecture Downloader</h1>
+<h1>Downloader</h1>
 <form method="post">
     <label>Enter Video URL:</label><br>
     <input type="text" name="video_url" size="80" required>
