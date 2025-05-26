@@ -4,8 +4,7 @@ from flask import Flask, request, redirect, url_for, send_file, render_template_
 
 # Constants
 COOKIES_PATH = "/mnt/data/cookies.txt"
-VIDEO_PATH = "/mnt/data/lecture_360p.mp4"
-AUDIO_PATH = "/mnt/data/lecture.mp3"
+DOWNLOAD_DIR = "/mnt/data"
 
 # Flask app
 app = Flask(__name__)
@@ -19,11 +18,11 @@ HTML = """
     <button type="submit">Download</button>
 </form>
 
-{% if downloaded %}
-    <p><b>Download ready:</b></p>
+{% if title %}
+    <p><b>Download ready:</b> {{ title }}</p>
     <ul>
-        <li><a href="{{ url_for('download_video') }}">Download 360p Video (MP4)</a></li>
-        <li><a href="{{ url_for('download_audio') }}">Download Audio (MP3)</a></li>
+        <li><a href="{{ url_for('download_video', filename=video_filename) }}">Download 360p Video (MP4)</a></li>
+        <li><a href="{{ url_for('download_audio', filename=audio_filename) }}">Download Audio (MP3)</a></li>
     </ul>
 {% endif %}
 """
@@ -31,46 +30,59 @@ HTML = """
 # Download + convert function
 def download_and_convert(video_url):
     try:
+        # Get video title
+        title = subprocess.check_output([
+            "yt-dlp",
+            "--cookies", COOKIES_PATH,
+            "--get-title",
+            video_url
+        ]).decode().strip()
+
+        # Sanitize filename
+        safe_title = "".join(c for c in title if c.isalnum() or c in " _-").rstrip()
+        video_path = os.path.join(DOWNLOAD_DIR, f"{safe_title}_360p.mp4")
+        audio_path = os.path.join(DOWNLOAD_DIR, f"{safe_title}.mp3")
+
         # Download 360p video
         subprocess.run([
             "yt-dlp",
             "--cookies", COOKIES_PATH,
             "-f", "best[height<=360][ext=mp4]",
-            "-o", VIDEO_PATH,
+            "-o", video_path,
             video_url
         ], check=True)
 
         # Extract MP3
         subprocess.run([
             "ffmpeg",
-            "-i", VIDEO_PATH,
+            "-i", video_path,
             "-vn",
             "-acodec", "libmp3lame",
-            AUDIO_PATH
+            audio_path
         ], check=True)
 
-        return True
+        return title, os.path.basename(video_path), os.path.basename(audio_path)
     except subprocess.CalledProcessError as e:
         print("Download failed:", e)
-        return False
+        return None, None, None
 
 # Web routes
 @app.route("/", methods=["GET", "POST"])
 def index():
-    downloaded = False
+    title = video_filename = audio_filename = None
     if request.method == "POST":
         video_url = request.form.get("video_url")
         if video_url:
-            downloaded = download_and_convert(video_url)
-    return render_template_string(HTML, downloaded=downloaded)
+            title, video_filename, audio_filename = download_and_convert(video_url)
+    return render_template_string(HTML, title=title, video_filename=video_filename, audio_filename=audio_filename)
 
-@app.route("/download/video")
-def download_video():
-    return send_file(VIDEO_PATH, as_attachment=True)
+@app.route("/download/video/<filename>")
+def download_video(filename):
+    return send_file(os.path.join(DOWNLOAD_DIR, filename), as_attachment=True)
 
-@app.route("/download/audio")
-def download_audio():
-    return send_file(AUDIO_PATH, as_attachment=True)
+@app.route("/download/audio/<filename>")
+def download_audio(filename):
+    return send_file(os.path.join(DOWNLOAD_DIR, filename), as_attachment=True)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
