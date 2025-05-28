@@ -1,20 +1,26 @@
 import os
 import subprocess
+import datetime
+import requests
 from flask import Flask, request, redirect, url_for, send_file, render_template_string
 
 # Constants
 COOKIES_PATH = "/mnt/data/cookies.txt"
 DOWNLOAD_DIR = "/mnt/data"
 
+# PenPencil API base
+PENPENCIL_API = "https://api.penpencil.co/v1/videos/video-url-details"
+VIDEO_URL_BASE = "https://d1d34p8vz63oiq.cloudfront.net/0fd876f5-47db-4c13-aa88-81d51a66597b/master.mpd"
+
 # Flask app
 app = Flask(__name__)
 
 # HTML Template
 HTML = """
-<h1>Downloader</h1>
+<h1>PenPencil Downloader</h1>
 <form method="post">
-    <label>Enter Video URL:</label><br>
-    <input type="text" name="video_url" size="80" required>
+    <label>Enter PenPencil childId:</label><br>
+    <input type="text" name="child_id" size="60" required>
     <button type="submit">Download</button>
 </form>
 
@@ -27,32 +33,40 @@ HTML = """
 {% endif %}
 """
 
-# Download + convert function
-def download_and_convert(video_url):
+def fetch_signed_mpd(child_id):
+    """Fetch the signed DASH .mpd URL from PenPencil API."""
+    params = {
+        "type": "RECORDED",
+        "videoContainerType": "DASH",
+        "reqType": "query",
+        "childId": child_id,
+        "parentId": "64d35df09bafa30018e3f598",
+        "videoUrl": VIDEO_URL_BASE,
+        "secondaryParentId": "64d3802cd6ec8e00180120fb",
+        "clientVersion": "201"
+    }
+    r = requests.get(PENPENCIL_API, params=params)
+    return r.json().get("data", {}).get("url")
+
+def download_and_convert(dash_url, child_id):
+    """Download video + extract MP3 using yt-dlp and ffmpeg."""
     try:
-        # Get video title
-        title = subprocess.check_output([
-            "yt-dlp",
-            "--cookies", COOKIES_PATH,
-            "--get-title",
-            video_url
-        ]).decode().strip()
+        # Title fallback to childId and date
+        date_str = datetime.datetime.now().strftime("%Y%m%d")
+        title = f"penpencil_{date_str}_{child_id}"
 
-        # Sanitize filename
-        safe_title = "".join(c for c in title if c.isalnum() or c in " _-").rstrip()
-        video_path = os.path.join(DOWNLOAD_DIR, f"{safe_title}_360p.mp4")
-        audio_path = os.path.join(DOWNLOAD_DIR, f"{safe_title}.mp3")
+        video_path = os.path.join(DOWNLOAD_DIR, f"{title}_360p.mp4")
+        audio_path = os.path.join(DOWNLOAD_DIR, f"{title}.mp3")
 
-        # Download 360p video
+        # Download best video <= 360p
         subprocess.run([
             "yt-dlp",
-            "--cookies", COOKIES_PATH,
             "-f", "best[height<=360][ext=mp4]",
             "-o", video_path,
-            video_url
+            dash_url
         ], check=True)
 
-        # Extract MP3
+        # Extract MP3 using ffmpeg
         subprocess.run([
             "ffmpeg",
             "-i", video_path,
@@ -62,18 +76,20 @@ def download_and_convert(video_url):
         ], check=True)
 
         return title, os.path.basename(video_path), os.path.basename(audio_path)
+
     except subprocess.CalledProcessError as e:
         print("Download failed:", e)
         return None, None, None
 
-# Web routes
 @app.route("/", methods=["GET", "POST"])
 def index():
     title = video_filename = audio_filename = None
     if request.method == "POST":
-        video_url = request.form.get("video_url")
-        if video_url:
-            title, video_filename, audio_filename = download_and_convert(video_url)
+        child_id = request.form.get("child_id")
+        if child_id:
+            signed_url = fetch_signed_mpd(child_id)
+            if signed_url:
+                title, video_filename, audio_filename = download_and_convert(signed_url, child_id)
     return render_template_string(HTML, title=title, video_filename=video_filename, audio_filename=audio_filename)
 
 @app.route("/download/video/<filename>")
