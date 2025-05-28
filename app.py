@@ -5,7 +5,7 @@ import requests
 from flask import Flask, request, redirect, url_for, send_file, render_template_string
 
 # Constants
-COOKIES_PATH = "/mnt/data/cookies.txt"
+COOKIES_PATH = "/mnt/data/xylem_cookies.txt"
 DOWNLOAD_DIR = "/mnt/data"
 
 # PenPencil API base
